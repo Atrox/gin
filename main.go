@@ -3,12 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-
-	"github.com/codegangsta/envy/lib"
-	"github.com/codegangsta/gin/lib"
-	shellwords "github.com/mattn/go-shellwords"
-	"github.com/urfave/cli"
-
 	"log"
 	"os"
 	"os/signal"
@@ -19,6 +13,10 @@ import (
 	"time"
 
 	"github.com/0xAX/notificator"
+	"github.com/codegangsta/envy/lib"
+	"github.com/codegangsta/gin/lib"
+	"github.com/mattn/go-shellwords"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -36,7 +34,7 @@ var (
 func main() {
 	app := cli.NewApp()
 	app.Name = "gin"
-	app.Usage = "A live reload utility for Go web applications."
+	app.Usage = "A live reload utility for Go web applications. [modified version: github.com/atrox/gin]"
 	app.Action = MainAction
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -90,6 +88,11 @@ func main() {
 			Name:   "all",
 			EnvVar: "GIN_ALL",
 			Usage:  "reloads whenever any file changes, as opposed to reloading only on .go file change",
+		},
+		cli.StringSliceFlag{
+			Name:   "ext,watchExtensions",
+			EnvVar: "GIN_WATCH_EXTENSIONS",
+			Usage:  "reloads whenever any file with that extension changes (this is in addition to .go) (example: .html,.css)",
 		},
 		cli.BoolFlag{
 			Name:   "godep,g",
@@ -146,6 +149,7 @@ func MainAction(c *cli.Context) {
 	laddr := c.GlobalString("laddr")
 	port := c.GlobalInt("port")
 	all := c.GlobalBool("all")
+	watchExtensions := c.GlobalStringSlice("watchExtensions")
 	appPort := strconv.Itoa(c.GlobalInt("appPort"))
 	immediate = c.GlobalBool("immediate")
 	keyFile := c.GlobalString("keyFile")
@@ -205,7 +209,7 @@ func MainAction(c *cli.Context) {
 	build(builder, runner, logger)
 
 	// scan for changes
-	scanChanges(c.GlobalString("path"), c.GlobalStringSlice("excludeDir"), all, func(path string) {
+	scanChanges(c.GlobalString("path"), c.GlobalStringSlice("excludeDir"), watchExtensions, all, func(path string) {
 		runner.Kill()
 		build(builder, runner, logger)
 	})
@@ -224,7 +228,6 @@ func EnvAction(c *cli.Context) {
 	for k, v := range env {
 		fmt.Printf("%s: %s\n", k, v)
 	}
-
 }
 
 func build(builder gin.Builder, runner gin.Runner, logger *log.Logger) {
@@ -262,7 +265,7 @@ func build(builder gin.Builder, runner gin.Runner, logger *log.Logger) {
 
 type scanCallback func(path string)
 
-func scanChanges(watchPath string, excludeDirs []string, allFiles bool, cb scanCallback) {
+func scanChanges(watchPath string, excludeDirs []string, watchExtensions []string, allFiles bool, cb scanCallback) {
 	for {
 		filepath.Walk(watchPath, func(path string, info os.FileInfo, err error) error {
 			if path == ".git" && info.IsDir() {
@@ -279,10 +282,25 @@ func scanChanges(watchPath string, excludeDirs []string, allFiles bool, cb scanC
 				return nil
 			}
 
-			if (allFiles || filepath.Ext(path) == ".go") && info.ModTime().After(startTime) {
+			done := func() error {
 				cb(path)
 				startTime = time.Now()
 				return errors.New("done")
+			}
+
+			if !info.ModTime().After(startTime) {
+				return nil
+			}
+
+			fileExt := filepath.Ext(path)
+			if allFiles || fileExt == ".go" {
+				return done()
+			}
+
+			for _, watchExtension := range watchExtensions {
+				if fileExt == watchExtension {
+					return done()
+				}
 			}
 
 			return nil

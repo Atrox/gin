@@ -277,8 +277,7 @@ func scanChanges(watchPath string, excludeDirs []string, watchExtensions []strin
 				}
 			}
 
-			// ignore hidden files
-			if filepath.Base(path)[0] == '.' {
+			if !info.ModTime().After(startTime) {
 				return nil
 			}
 
@@ -288,11 +287,19 @@ func scanChanges(watchPath string, excludeDirs []string, watchExtensions []strin
 				return errors.New("done")
 			}
 
-			if !info.ModTime().After(startTime) {
+			fileBase := strings.ToLower(filepath.Base(path))
+			fileExt := filepath.Ext(fileBase)
+
+			// reload when files starting with .env change
+			if strings.HasPrefix(fileBase, ".env") {
+				return done()
+			}
+
+			// ignore hidden files
+			if fileBase[0] == '.' {
 				return nil
 			}
 
-			fileExt := filepath.Ext(path)
 			if allFiles || fileExt == ".go" {
 				return done()
 			}
